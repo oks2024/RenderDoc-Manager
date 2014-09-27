@@ -52,6 +52,14 @@ RenderDocManager::RenderDocManager(HWND p_Handle, LPCWSTR pRenderDocPath, LPCWST
 
     m_RenderDocInitRemoteAccess = (pRENDERDOC_InitRemoteAccess)GetRenderDocFunctionPointer(m_RenderDocDLL, "RENDERDOC_InitRemoteAccess");
 
+    // Make sure that the code is compatible with the current installed version.
+    if (RENDERDOC_API_VERSION != m_RenderDocGetAPIVersion())
+    {
+        OutputDebugString(L"Render doc API is not compatible !");
+        FreeLibrary(m_RenderDocDLL);
+        return;
+    }
+
     m_RenderDocSetLogFile(pCapturePath);
 
     KeyButton captureKey = eKey_F12;
@@ -59,10 +67,12 @@ RenderDocManager::RenderDocManager(HWND p_Handle, LPCWSTR pRenderDocPath, LPCWST
     m_RenderDocSetFocusToggleKeys(NULL, 0);
     m_RenderDocSetCaptureKeys(NULL, 0);
 
+    // Uncomment to define a capture key.
     //KeyButton captureKey = eKey_F12;
     //m_RenderDocSetCaptureKeys(&captureKey, 1);
 
     CaptureOptions options;
+    // These options might slow down your program, enable only the ones you need.
     options.CaptureCallstacks = true;
     options.CaptureAllCmdLists = true;
     options.SaveAllInitials = true;
@@ -82,13 +92,31 @@ void RenderDocManager::StartFrameCapture()
     m_CaptureStarted = true;
 }
 
+// In some cases a capture can fail. It happens when Map() was called before the StartFrameCapture() and then Unmap() is called.
+// It also happen if you start recording a command list before the StartFrameCapture() (unless you have the option
+// CaptureAllCmdLists enabled).
+// In these cases, m_RenderDocEndFrameCapture will return false and start capturing again until a capture succeed, unless 
+// m_RenderDocEndFrameCapture is called again.
 void RenderDocManager::EndFrameCapture()
 {
     if(!m_CaptureStarted)
         return;
 
-    m_RenderDocEndFrameCapture(m_Handle);
+    if(m_RenderDocEndFrameCapture(m_Handle))
+    {
+        m_CaptureStarted = false;
+        return;
+    }
+    
+    OutputDebugString(L"Capture has failed !")
+        ;
+    // The capture has failed, calling m_RenderDocEndFrameCapture several time to make sure it won't keep capturing forever.
+    while (!m_RenderDocEndFrameCapture(m_Handle))
+    {
+    }
+
     m_CaptureStarted = false;
+    return;
 }
 
 RenderDocManager::~RenderDocManager(void)
